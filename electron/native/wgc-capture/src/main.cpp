@@ -24,12 +24,21 @@ static std::atomic<int64_t> g_accumulatedPausedHns{0};
 static std::mutex g_stopMutex;
 static std::condition_variable g_stopCv;
 
+static void reportMicrophoneCaptureUnavailable() {
+    std::cerr << "WARNING: Failed to initialize WASAPI mic capture" << std::endl;
+    // This stable stdout marker is ordered before "Recording started", allowing
+    // Electron to select its per-recording browser fallback without a pipe race.
+    std::cout << "MICROPHONE_CAPTURE_UNAVAILABLE" << std::endl;
+    std::cout.flush();
+}
+
 struct CaptureConfig {
     int64_t displayId = 0;
     int64_t windowHandle = 0;
     std::string outputPath;
     std::string audioOutputPath;
     std::string micOutputPath;
+    std::string micDeviceId;
     std::string micDeviceName;
     int fps = 60;
     int width = 0;
@@ -119,6 +128,7 @@ static bool parseSimpleJson(const std::string& json, CaptureConfig& config) {
 
     config.audioOutputPath = findString("audioOutputPath");
     config.micOutputPath = findString("micOutputPath");
+    config.micDeviceId = findString("micDeviceId");
     config.micDeviceName = findString("micDeviceName");
 
     auto findBool = [&](const std::string& key) -> bool {
@@ -280,6 +290,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Keep Win32 monitor/window rectangles in physical pixels. Without
+    // per-monitor awareness, mixed-DPI desktops can report virtualized bounds
+    // that do not line up with the WGC monitor texture.
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
 
     CaptureConfig config;
@@ -338,6 +352,7 @@ int main(int argc, char* argv[]) {
     std::atomic<int64_t> frameCount{0};
     std::atomic<int64_t> firstVideoTimestampHns{-1};
     std::atomic<bool> recordingStartedAnnounced{false};
+    std::atomic<bool> captureSetupComplete{false};
     session.setFrameCallback([&](ID3D11Texture2D* texture, int64_t timestampHns) {
         g_lastFrameTimestampHns = timestampHns;
         int64_t expectedFirstVideoTimestampHns = -1;
@@ -350,7 +365,7 @@ int main(int argc, char* argv[]) {
 
         if (encoder.writeFrame(texture, adjustedTimestampHns)) {
             const int64_t writtenFrames = frameCount.fetch_add(1) + 1;
-            if (writtenFrames == 1 && !recordingStartedAnnounced.exchange(true)) {
+            if (captureSetupComplete && writtenFrames >= 1 && !recordingStartedAnnounced.exchange(true)) {
                 std::cout << "Recording started" << std::endl;
                 std::cout.flush();
             }
@@ -377,9 +392,12 @@ int main(int argc, char* argv[]) {
     }
 
     if (config.captureMic && !config.micOutputPath.empty()) {
-        micInitialized = micCapture.initializeMic(config.micOutputPath, config.micDeviceName);
+        micInitialized = micCapture.initializeMic(
+            config.micOutputPath,
+            config.micDeviceId,
+            config.micDeviceName);
         if (!micInitialized) {
-            std::cerr << "WARNING: Failed to initialize WASAPI mic capture" << std::endl;
+            reportMicrophoneCaptureUnavailable();
         }
     }
 
@@ -394,7 +412,11 @@ int main(int argc, char* argv[]) {
     }
     if (micInitialized) {
         micActive = micCapture.start();
+        if (!micActive) {
+            reportMicrophoneCaptureUnavailable();
+        }
     }
+    captureSetupComplete = true;
 
     // Wait for stop signal while pausing/resuming audio tracks in lockstep.
     while (!g_stopRequested && !session.hasFatalError()) {
@@ -416,23 +438,11 @@ int main(int argc, char* argv[]) {
     if (audioActive) loopback.stop();
     if (micActive) micCapture.stop();
 
-    if (session.hasFatalError()) {
-        std::cerr << "ERROR: WGC capture session failed during recording" << std::endl;
-        encoder.finalize();
-        DeleteFileW(outputPathW.c_str());
-        if (!config.audioOutputPath.empty()) {
-            const std::wstring audioPathW = utf8ToWide(config.audioOutputPath);
-            const std::wstring audioMetadataPathW = utf8ToWide(config.audioOutputPath + ".json");
-            DeleteFileW(audioPathW.c_str());
-            DeleteFileW(audioMetadataPathW.c_str());
-        }
-        if (!config.micOutputPath.empty()) {
-            const std::wstring micPathW = utf8ToWide(config.micOutputPath);
-            const std::wstring micMetadataPathW = utf8ToWide(config.micOutputPath + ".json");
-            DeleteFileW(micPathW.c_str());
-            DeleteFileW(micMetadataPathW.c_str());
-        }
-        return 1;
+    // A device/source failure can happen after minutes of valid capture. Finalize
+    // the same tracks as an ordinary stop; never discard that recoverable take.
+    const bool interrupted = session.hasFatalError();
+    if (interrupted) {
+        std::cout << "CAPTURE_INTERRUPTED: WGC capture session failed during recording" << std::endl;
     }
 
     if (audioActive) {
@@ -450,6 +460,7 @@ int main(int argc, char* argv[]) {
 
     if (frameCount.load() <= 0) {
         std::cerr << "ERROR: No video frames were captured before stop" << std::endl;
+        encoder.finalize();
         DeleteFileW(outputPathW.c_str());
         return 1;
     }
@@ -463,7 +474,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::cout << "Recording stopped. Output path: " << config.outputPath << std::endl;
+    std::cout << (interrupted ? "Recording interrupted. Output path: " : "Recording stopped. Output path: ")
+              << config.outputPath << std::endl;
     if (audioActive) {
         if (
             loopback.dataDiscontinuityCount() > 0 ||
@@ -512,5 +524,5 @@ int main(int argc, char* argv[]) {
     Sleep(100);
 
     // Fast exit to avoid WinRT/COM teardown crashes during apartment cleanup
-    ExitProcess(0);
+    ExitProcess(interrupted ? 1 : 0);
 }

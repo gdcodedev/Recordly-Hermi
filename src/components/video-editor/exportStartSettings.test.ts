@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { resolveExportStartSettings } from "./exportStartSettings";
+import { resolveExportStartSettings, resolveShareExportSettings } from "./exportStartSettings";
 
 const baseOptions = {
 	sourceWidth: 1920,
 	sourceHeight: 1080,
 	exportFormat: "mp4" as const,
+	includeCaptionSidecar: true,
 	exportEncodingMode: "balanced" as const,
 	exportQuality: "good" as const,
 	mp4FrameRate: 30 as const,
@@ -19,6 +20,7 @@ describe("resolveExportStartSettings", () => {
 	it("preserves MP4 dropdown settings", () => {
 		expect(resolveExportStartSettings(baseOptions)).toEqual({
 			format: "mp4",
+			includeCaptionSidecar: true,
 			encodingMode: "balanced",
 			mp4FrameRate: 30,
 			backendPreference: "auto",
@@ -41,6 +43,7 @@ describe("resolveExportStartSettings", () => {
 			}),
 		).toEqual({
 			format: "gif",
+			includeCaptionSidecar: false,
 			encodingMode: undefined,
 			mp4FrameRate: undefined,
 			backendPreference: undefined,
@@ -71,4 +74,38 @@ describe("resolveExportStartSettings", () => {
 			height: 678,
 		});
 	});
+});
+
+it("preserves the selected quality, encoding and FPS for sharing", () => {
+	const local = resolveExportStartSettings({
+		...baseOptions,
+		mp4FrameRate: 60,
+		exportEncodingMode: "quality",
+	});
+	expect(resolveShareExportSettings(local)).toMatchObject({
+		format: "mp4",
+		quality: "good",
+		encodingMode: "quality",
+		mp4FrameRate: 60,
+		includeCaptionSidecar: false,
+	});
+	expect(local).toMatchObject({
+		encodingMode: "quality",
+		mp4FrameRate: 60,
+		quality: "good",
+		includeCaptionSidecar: true,
+	});
+});
+
+it("carries GIF size optimization only for opted-in GIF exports", () => {
+	const settings = resolveExportStartSettings({
+		...baseOptions,
+		exportFormat: "gif",
+		gifOptimizeSize: true,
+	});
+	expect(settings.gifConfig?.optimizeSize).toBe(true);
+	expect(resolveShareExportSettings(settings).gifConfig).toBeUndefined();
+	expect(
+		resolveExportStartSettings({ ...baseOptions, gifOptimizeSize: true }).gifConfig,
+	).toBeUndefined();
 });

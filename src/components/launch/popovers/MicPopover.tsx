@@ -1,4 +1,4 @@
-import { MicrophoneSlashIcon, SpeakerHighIcon, SpeakerXIcon } from "@phosphor-icons/react";
+import { MicrophoneSlashIcon, SpeakerHighIcon, SpeakerXIcon } from "@/components/ui/icons";
 import { useScopedT } from "@/contexts/I18nContext";
 import { DropdownItem, HudPopover, MicDeviceRow } from "./PopoverScaffold";
 import { useLaunchPopoverCoordinator } from "./LaunchPopoverCoordinator";
@@ -50,17 +50,18 @@ export function MicPopover({
 			}}
 			trigger={trigger}
 			align="start"
+			label={t("recording.audioSettings", "Audio settings")}
 		>
-			<div className={styles.ddLabel}>{t("recording.microphone")}</div>
 			<DropdownItem
-				icon={systemAudioEnabled ? <SpeakerHighIcon size={16} /> : <SpeakerXIcon size={16} />}
+				icon={
+					systemAudioEnabled ? <SpeakerHighIcon size={16} /> : <SpeakerXIcon size={16} />
+				}
 				selected={systemAudioEnabled}
 				onClick={onToggleSystemAudio}
 			>
-				{systemAudioEnabled
-					? t("recording.disableSystemAudio")
-					: t("recording.enableSystemAudio")}
+				{t("recording.systemAudio")}
 			</DropdownItem>
+			<div className={styles.ddLabel}>{t("recording.microphone")}</div>
 			{microphoneEnabled && (
 				<DropdownItem
 					icon={<MicrophoneSlashIcon size={16} />}
@@ -73,7 +74,9 @@ export function MicPopover({
 				</DropdownItem>
 			)}
 			{!microphoneEnabled && (
-				<div className="px-3 py-2 text-xs text-[var(--launch-text-muted)]">{t("recording.selectMicToEnable")}</div>
+				<div className="px-3 py-2 text-xs text-[var(--launch-text-muted)]">
+					{t("recording.selectMicToEnable")}
+				</div>
 			)}
 			{devices.map((device) => (
 				<MicDeviceRow
@@ -81,13 +84,16 @@ export function MicPopover({
 					device={device}
 					selected={
 						microphoneEnabled &&
-						(microphoneDeviceId === device.deviceId || selectedDeviceId === device.deviceId)
+						(microphoneDeviceId === device.deviceId ||
+							selectedDeviceId === device.deviceId)
 					}
 					onSelect={() => onSelectDevice(device.deviceId)}
 				/>
 			))}
 			{devices.length === 0 && (
-				<div className="text-center text-xs text-[var(--launch-text-muted)] py-4">{t("recording.noMicrophonesFound")}</div>
+				<div className="text-center text-xs text-[var(--launch-text-muted)] py-4">
+					{t("recording.noMicrophonesFound")}
+				</div>
 			)}
 		</HudPopover>
 	);

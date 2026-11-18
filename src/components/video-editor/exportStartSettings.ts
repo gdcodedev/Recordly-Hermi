@@ -16,24 +16,28 @@ export function resolveExportStartSettings({
 	sourceWidth,
 	sourceHeight,
 	exportFormat,
+	includeCaptionSidecar,
 	exportEncodingMode,
 	exportQuality,
 	mp4FrameRate,
 	exportBackendPreference,
 	exportPipelineModel,
 	gifFrameRate,
+	gifOptimizeSize = false,
 	gifLoop,
 	gifSizePreset,
 }: {
 	sourceWidth: number;
 	sourceHeight: number;
 	exportFormat: ExportFormat;
+	includeCaptionSidecar: boolean;
 	exportEncodingMode: ExportEncodingMode;
 	exportQuality: ExportQuality;
 	mp4FrameRate: ExportMp4FrameRate;
 	exportBackendPreference: ExportBackendPreference;
 	exportPipelineModel: ExportPipelineModel;
 	gifFrameRate: GifFrameRate;
+	gifOptimizeSize?: boolean;
 	gifLoop: boolean;
 	gifSizePreset: GifSizePreset;
 }): ExportSettings {
@@ -44,6 +48,7 @@ export function resolveExportStartSettings({
 
 	return {
 		format: exportFormat,
+		includeCaptionSidecar: exportFormat === "mp4" ? includeCaptionSidecar : false,
 		encodingMode: exportFormat === "mp4" ? exportEncodingMode : undefined,
 		mp4FrameRate: exportFormat === "mp4" ? mp4FrameRate : undefined,
 		backendPreference: exportFormat === "mp4" ? exportBackendPreference : undefined,
@@ -52,6 +57,7 @@ export function resolveExportStartSettings({
 		gifConfig:
 			exportFormat === "gif" && gifDimensions
 				? {
+						...(gifOptimizeSize ? { optimizeSize: true } : {}),
 						frameRate: gifFrameRate,
 						loop: gifLoop,
 						sizePreset: gifSizePreset,
@@ -59,5 +65,14 @@ export function resolveExportStartSettings({
 						height: gifDimensions.height,
 					}
 				: undefined,
+	};
+}
+
+export function resolveShareExportSettings(settings: ExportSettings): ExportSettings {
+	return {
+		...settings,
+		format: "mp4",
+		includeCaptionSidecar: false,
+		gifConfig: undefined,
 	};
 }

@@ -1,3 +1,4 @@
+import { useI18n } from "@/contexts/I18nContext";
 import { useEffect, useState } from "react";
 
 export interface VideoDevice {
@@ -6,9 +7,8 @@ export interface VideoDevice {
 	groupId: string;
 }
 
-let hasRequestedVideoLabels = false;
-
-export function useVideoDevices(enabled: boolean = true) {
+export function useVideoDevices(enabled: boolean = true, preferredDeviceId?: string) {
+	const { t } = useI18n();
 	const [devices, setDevices] = useState<VideoDevice[]>([]);
 	const [selectedDeviceId, setSelectedDeviceId] = useState<string>("default");
 	const [isLoading, setIsLoading] = useState(false);
@@ -24,7 +24,6 @@ export function useVideoDevices(enabled: boolean = true) {
 
 		const loadDevices = async () => {
 			const loadId = ++activeLoadId;
-			let permissionStream: MediaStream | null = null;
 
 			try {
 				if (mounted && loadId === activeLoadId) {
@@ -32,39 +31,25 @@ export function useVideoDevices(enabled: boolean = true) {
 					setError(null);
 				}
 
-				let allDevices = await navigator.mediaDevices.enumerateDevices();
-				let videoInputs = allDevices
+				const allDevices = await navigator.mediaDevices.enumerateDevices();
+				const videoInputs = allDevices
 					.filter((device) => device.kind === "videoinput")
 					.map((device, index) => ({
 						deviceId: device.deviceId,
-						label: device.label || `Camera ${index + 1}`,
+						label:
+							device.label ||
+							t("notifications.camera", "Camera {{index}}", { index: index + 1 }),
 						groupId: device.groupId,
 					}));
-
-				const needsLabelPermission =
-					videoInputs.length > 0 && videoInputs.every((device) => !device.label.trim());
-
-				if (needsLabelPermission && !hasRequestedVideoLabels) {
-					permissionStream = await navigator.mediaDevices.getUserMedia({
-						video: true,
-						audio: false,
-					});
-					allDevices = await navigator.mediaDevices.enumerateDevices();
-					videoInputs = allDevices
-						.filter((device) => device.kind === "videoinput")
-						.map((device, index) => ({
-							deviceId: device.deviceId,
-							label: device.label || `Camera ${index + 1}`,
-							groupId: device.groupId,
-						}));
-					hasRequestedVideoLabels = true;
-				}
 
 				if (mounted && loadId === activeLoadId) {
 					setDevices(videoInputs);
 					setSelectedDeviceId((currentDeviceId) => {
-						if (currentDeviceId === "default" && videoInputs.length > 0) {
-							return videoInputs[0].deviceId;
+						if (
+							preferredDeviceId &&
+							videoInputs.some((device) => device.deviceId === preferredDeviceId)
+						) {
+							return preferredDeviceId;
 						}
 
 						if (
@@ -82,12 +67,14 @@ export function useVideoDevices(enabled: boolean = true) {
 					const message =
 						error instanceof Error
 							? error.message
-							: "Failed to enumerate video devices";
+							: t(
+									"notifications.cameraDevicesFailed",
+									"Failed to enumerate video devices",
+								);
 					setError(message);
 					console.error("Error loading video devices:", error);
 				}
 			} finally {
-				permissionStream?.getTracks().forEach((track) => track.stop());
 				if (mounted && loadId === activeLoadId) {
 					setIsLoading(false);
 				}
@@ -106,7 +93,7 @@ export function useVideoDevices(enabled: boolean = true) {
 			mounted = false;
 			navigator.mediaDevices.removeEventListener("devicechange", handleDeviceChange);
 		};
-	}, [enabled]);
+	}, [enabled, preferredDeviceId, t]);
 
 	return {
 		devices,

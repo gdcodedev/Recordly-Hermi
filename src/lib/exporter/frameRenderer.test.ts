@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_WEBCAM_OVERLAY } from "../../components/video-editor/types";
 
@@ -90,13 +92,20 @@ vi.mock("./localMediaSource", () => ({
 
 import { FrameRenderer } from "./frameRenderer";
 
+const rendererSource = readFileSync(
+	fileURLToPath(new URL("./legacyFrameBackend.ts", import.meta.url)),
+	"utf8",
+);
+
 type MockFunction = ReturnType<typeof vi.fn>;
 type MockContext = {
 	beginPath: MockFunction;
 	moveTo: MockFunction;
 	lineTo: MockFunction;
+	arcTo: MockFunction;
 	closePath: MockFunction;
 	clip: MockFunction;
+	stroke: MockFunction;
 	drawImage: MockFunction;
 	fillRect: MockFunction;
 	save: MockFunction;
@@ -105,6 +114,7 @@ type MockContext = {
 	scale: MockFunction;
 	clearRect: MockFunction;
 	filter: string;
+	fillStyle: string;
 };
 type MockCanvas = ReturnType<typeof createMockCanvas>;
 type FrameRendererTestAccess = {
@@ -122,6 +132,20 @@ type FrameRendererTestAccess = {
 		outputHeight: number,
 	) => void;
 };
+
+describe("FrameRenderer mask hierarchy", () => {
+	it("keeps the mask in the video wrapper when camera transforms change", () => {
+		expect(rendererSource).toContain(
+			"context.cameraContainer.addChild(context.videoEffectsContainer)",
+		);
+		expect(rendererSource).toContain(
+			"context.videoEffectsContainer.addChild(context.maskGraphics)",
+		);
+		expect(rendererSource).not.toContain(
+			"context.cameraContainer.addChild(context.maskGraphics)",
+		);
+	});
+});
 
 type Listener = {
 	callback: () => void;
@@ -224,8 +248,10 @@ function createMockContext() {
 		beginPath: vi.fn(),
 		moveTo: vi.fn(),
 		lineTo: vi.fn(),
+		arcTo: vi.fn(),
 		closePath: vi.fn(),
 		clip: vi.fn(),
+		stroke: vi.fn(),
 		drawImage: vi.fn(),
 		fillRect: vi.fn(),
 		save: vi.fn(),
@@ -234,6 +260,7 @@ function createMockContext() {
 		scale: vi.fn(),
 		clearRect: vi.fn(),
 		filter: "",
+		fillStyle: "",
 	};
 }
 
@@ -247,7 +274,7 @@ function createMockCanvas() {
 	};
 }
 
-function createRenderer() {
+function createRenderer(overrides: Partial<ConstructorParameters<typeof FrameRenderer>[0]> = {}) {
 	return new FrameRenderer({
 		width: 1920,
 		height: 1080,
@@ -259,6 +286,8 @@ function createRenderer() {
 		cropRegion: { x: 0, y: 0, width: 1, height: 1 },
 		webcam: {
 			...DEFAULT_WEBCAM_OVERLAY,
+			// These source/cache and rim assertions exercise the standard frame.
+			previewFrame: "standard",
 			enabled: true,
 			mirror: false,
 			shadow: 0,
@@ -266,10 +295,29 @@ function createRenderer() {
 		webcamUrl: "file:///tmp/webcam.webm",
 		videoWidth: 1920,
 		videoHeight: 1080,
+		...overrides,
 	});
 }
 
 describe("FrameRenderer webcam export path", () => {
+	it("composites the background during a gap without source layers", async () => {
+		const renderer = createRenderer();
+		const camera = { visible: true };
+		const context = createMockContext();
+		const app = { stage: {}, renderer: { render: vi.fn() } };
+		const composite = vi.fn();
+		Object.assign(renderer, {
+			app,
+			cameraContainer: camera,
+			videoContainer: {},
+			compositeCtx: context,
+			compositeWithShadows: composite,
+		});
+		await renderer.renderFrame(null, 0, 0, 33333, 1500000);
+		expect(camera.visible).toBe(false);
+		expect(app.renderer.render).toHaveBeenCalledWith(app.stage);
+		expect(composite).toHaveBeenCalledWith(false);
+	});
 	const createdCanvases: ReturnType<typeof createMockCanvas>[] = [];
 
 	beforeEach(() => {
@@ -300,6 +348,76 @@ describe("FrameRenderer webcam export path", () => {
 				}),
 			},
 		});
+	});
+
+	it("seeks optional sample media directly without starting forward decoders", async () => {
+		vi.clearAllMocks();
+		const renderer = createRenderer({
+			preferMediaElementSampling: true,
+			wallpaper: "/wallpapers/wispysky.mp4",
+		});
+		const access = renderer as unknown as FrameRendererTestAccess & {
+			setupWebcamSource(): Promise<void>;
+			setupBackground(): Promise<void>;
+			backgroundVideoElement: FakeVideoElement;
+		};
+		await access.setupWebcamSource();
+		await access.setupBackground();
+		expect(initializeForwardFrameSourceMock).not.toHaveBeenCalled();
+		expect(resolveMediaElementSourceMock).toHaveBeenCalledTimes(2);
+		access.webcamVideoElement!.duration = 600;
+		await access.syncWebcamFrame(300);
+		expect(access.webcamVideoElement!.currentTime).toBe(300);
+		expect(getForwardFrameAtTimeMock).not.toHaveBeenCalled();
+		expect(access.backgroundVideoElement).toBeTruthy();
+	});
+
+	it("cancels pending optional-media readiness without waiting for a media event", async () => {
+		const createElement = document.createElement.bind(document);
+		vi.spyOn(document, "createElement").mockImplementation(((tag: string) =>
+			tag === "video"
+				? new FakeVideoElement({ readyState: 0 })
+				: createElement(tag)) as typeof document.createElement);
+		const renderer = createRenderer({ preferMediaElementSampling: true });
+		const access = renderer as unknown as { setupWebcamSource(): Promise<void> };
+		const loading = access.setupWebcamSource();
+		await Promise.resolve();
+		renderer.cancelPendingMedia();
+		await expect(loading).resolves.toBeUndefined();
+	});
+
+	it("settles an optional-media seek immediately when sampling is cancelled", async () => {
+		vi.useFakeTimers();
+		try {
+			const renderer = createRenderer({ preferMediaElementSampling: true });
+			const access = renderer as unknown as FrameRendererTestAccess;
+			access.webcamVideoElement = new FakeVideoElement({ duration: 600 });
+			const seeking = access.syncWebcamFrame(300);
+			renderer.cancelPendingMedia();
+			await expect(seeking).resolves.toBeUndefined();
+			expect(access.webcamSeekPromise).toBeNull();
+			expect(vi.getTimerCount()).toBe(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("cancels forward media reads while retaining in-flight renderer resources", () => {
+		const renderer = createRenderer();
+		const app = { destroy: vi.fn() };
+		const background = { cancel: vi.fn(), destroy: vi.fn() };
+		const webcam = { cancel: vi.fn(), destroy: vi.fn() };
+		Object.assign(renderer, {
+			app,
+			backgroundForwardFrameSource: background,
+			webcamForwardFrameSource: webcam,
+		});
+		renderer.cancelPendingMedia();
+		expect(background.cancel).toHaveBeenCalledOnce();
+		expect(webcam.cancel).toHaveBeenCalledOnce();
+		expect(background.destroy).not.toHaveBeenCalled();
+		expect(webcam.destroy).not.toHaveBeenCalled();
+		expect(app.destroy).not.toHaveBeenCalled();
 	});
 
 	it("clamps webcam sync seeks to the media duration", async () => {
@@ -354,6 +472,45 @@ describe("FrameRenderer webcam export path", () => {
 		expect(renderer.webcamSeekPromise).toBeNull();
 	});
 
+	it("keeps a cropped camera without an explicit shape square in legacy export", () => {
+		const renderer = createRenderer({
+			webcam: {
+				enabled: true,
+				shape: undefined,
+				width: 30,
+				height: 30,
+				cropRegion: { x: 0, y: 0, width: 0.5, height: 1 },
+			},
+		}) as unknown as FrameRendererTestAccess & {
+			webcamMotionBlur: { render: (...args: unknown[]) => null };
+		};
+		const cached = createMockCanvas();
+		cached.width = 640;
+		cached.height = 360;
+		renderer.webcamVideoElement = new FakeVideoElement({
+			currentTime: 0,
+			readyState: 0,
+			videoWidth: 640,
+			videoHeight: 360,
+		});
+		renderer.webcamFrameCacheCanvas = cached;
+		renderer.webcamFrameCacheCtx = cached.getContext("2d");
+		renderer.currentVideoTime = 0;
+		renderer.animationState.appliedScale = 1;
+		const render = vi.spyOn(renderer.webcamMotionBlur, "render").mockReturnValue(null);
+		renderer.drawWebcamOverlay(
+			createMockContext() as unknown as CanvasRenderingContext2D,
+			1280,
+			720,
+		);
+		expect(render).toHaveBeenCalledWith(
+			expect.objectContaining({
+				shape: "squircle",
+				layout: expect.objectContaining({ width: 216, height: 216 }),
+			}),
+		);
+	});
+
 	it("uses the cached webcam frame when the live video is out of sync", () => {
 		const renderer = createRenderer() as unknown as FrameRendererTestAccess;
 		const outputContext = createMockContext();
@@ -376,12 +533,14 @@ describe("FrameRenderer webcam export path", () => {
 
 		renderer.drawWebcamOverlay(outputContext as unknown as CanvasRenderingContext2D, 1280, 720);
 
-		const bubbleCanvas = createdCanvases[0];
+		const bubbleCanvas = createdCanvases.at(-1)!;
 		expect(bubbleCanvas).toBeDefined();
 		expect((bubbleCanvas.context as MockContext).drawImage.mock.calls[0][0]).toBe(
 			cachedFrameCanvas,
 		);
-		expect((outputContext as MockContext).drawImage.mock.calls[0][0]).toBe(bubbleCanvas);
+		expect((outputContext as MockContext).drawImage.mock.calls[0][0]).toBe(
+			createdCanvases.at(-1),
+		);
 	});
 
 	it("keeps drawing the cached webcam frame when the live element temporarily has no current data", () => {
@@ -406,12 +565,14 @@ describe("FrameRenderer webcam export path", () => {
 
 		renderer.drawWebcamOverlay(outputContext as unknown as CanvasRenderingContext2D, 1280, 720);
 
-		const bubbleCanvas = createdCanvases[0];
+		const bubbleCanvas = createdCanvases.at(-1)!;
 		expect(bubbleCanvas).toBeDefined();
 		expect((bubbleCanvas.context as MockContext).drawImage.mock.calls[0][0]).toBe(
 			cachedFrameCanvas,
 		);
-		expect((outputContext as MockContext).drawImage.mock.calls[0][0]).toBe(bubbleCanvas);
+		expect((outputContext as MockContext).drawImage.mock.calls[0][0]).toBe(
+			createdCanvases.at(-1),
+		);
 	});
 
 	it("uses the live webcam frame and refreshes the cache when the video is synchronized", () => {
@@ -431,12 +592,18 @@ describe("FrameRenderer webcam export path", () => {
 
 		renderer.drawWebcamOverlay(outputContext as unknown as CanvasRenderingContext2D, 1280, 720);
 
-		const bubbleCanvas = createdCanvases[0];
-		const cacheCanvas = createdCanvases[1];
+		const cacheCanvas = createdCanvases[0];
+		const bubbleCanvas = createdCanvases.at(-1)!;
 		expect(cacheCanvas).toBeDefined();
 		expect((cacheCanvas.context as MockContext).drawImage.mock.calls[0][0]).toBe(webcamVideo);
 		expect((bubbleCanvas.context as MockContext).drawImage.mock.calls[0][0]).toBe(cacheCanvas);
-		expect((outputContext as MockContext).drawImage.mock.calls[0][0]).toBe(bubbleCanvas);
+		expect(bubbleCanvas.context.stroke).toHaveBeenCalledOnce();
+		expect(bubbleCanvas.context.drawImage.mock.invocationCallOrder[0]).toBeLessThan(
+			bubbleCanvas.context.stroke.mock.invocationCallOrder[0],
+		);
+		expect((outputContext as MockContext).drawImage.mock.calls[0][0]).toBe(
+			createdCanvases.at(-1),
+		);
 	});
 
 	it("uses the live webcam frame when sync is correct on an offset webcam timeline", () => {
@@ -463,12 +630,14 @@ describe("FrameRenderer webcam export path", () => {
 
 		renderer.drawWebcamOverlay(outputContext as unknown as CanvasRenderingContext2D, 1280, 720);
 
-		const bubbleCanvas = createdCanvases[0];
-		const cacheCanvas = createdCanvases[1];
+		const cacheCanvas = createdCanvases[0];
+		const bubbleCanvas = createdCanvases.at(-1)!;
 		expect(cacheCanvas).toBeDefined();
 		expect((cacheCanvas.context as MockContext).drawImage.mock.calls[0][0]).toBe(webcamVideo);
 		expect((bubbleCanvas.context as MockContext).drawImage.mock.calls[0][0]).toBe(cacheCanvas);
-		expect((outputContext as MockContext).drawImage.mock.calls[0][0]).toBe(bubbleCanvas);
+		expect((outputContext as MockContext).drawImage.mock.calls[0][0]).toBe(
+			createdCanvases.at(-1),
+		);
 	});
 
 	it("reuses the webcam bubble canvas across frames", () => {
@@ -487,9 +656,10 @@ describe("FrameRenderer webcam export path", () => {
 		renderer.animationState.appliedScale = 1;
 
 		renderer.drawWebcamOverlay(outputContext as unknown as CanvasRenderingContext2D, 1280, 720);
+		const canvasCount = createdCanvases.length;
 		renderer.drawWebcamOverlay(outputContext as unknown as CanvasRenderingContext2D, 1280, 720);
 
-		expect(createdCanvases).toHaveLength(2);
+		expect(createdCanvases).toHaveLength(canvasCount);
 	});
 
 	it("prefers decoder-backed sync for video wallpapers during export", async () => {

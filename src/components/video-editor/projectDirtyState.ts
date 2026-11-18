@@ -1,4 +1,4 @@
-import type { EditorProjectData } from "./projectPersistence";
+import { type EditorProjectData, stripProjectUserPreferences } from "./projectPersistence";
 
 function isComparableObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
@@ -42,12 +42,30 @@ function areDeepEqual(left: unknown, right: unknown): boolean {
 	return true;
 }
 
+function normalizeProjectComparison(project: EditorProjectData | null) {
+	if (!project?.editor || typeof project.editor !== "object") {
+		return project;
+	}
+
+	const editor = stripProjectUserPreferences(project.editor) as Record<string, unknown>;
+	// A loaded clip sequence projects these source gaps once duration is known.
+	// Only clip edits are user changes; legacy trim-only projects still compare trims.
+	if (Array.isArray(editor.clipRegions) && editor.clipRegions.length > 0) {
+		delete editor.trimRegions;
+	}
+	return { ...project, editor };
+}
+
 export function hasUnsavedProjectChanges(
 	currentProjectSnapshot: EditorProjectData | null,
 	lastSavedSnapshot: EditorProjectData | null,
 ): boolean {
+	const comparableCurrentSnapshot = normalizeProjectComparison(currentProjectSnapshot);
+	const comparableLastSavedSnapshot = normalizeProjectComparison(lastSavedSnapshot);
+
 	return Boolean(
-		currentProjectSnapshot &&
-			(!lastSavedSnapshot || !areDeepEqual(currentProjectSnapshot, lastSavedSnapshot)),
+		comparableCurrentSnapshot &&
+			(!comparableLastSavedSnapshot ||
+				!areDeepEqual(comparableCurrentSnapshot, comparableLastSavedSnapshot)),
 	);
 }

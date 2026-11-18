@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
 	getScreenSourceIdForDisplay,
 	LINUX_PORTAL_SCREEN_SOURCE_ID,
-	shouldUseSyntheticLinuxPortalSource,
+	resolveDisplayMediaSource,
 } from "./sourceMapping";
 
 describe("getScreenSourceIdForDisplay", () => {
@@ -50,64 +50,58 @@ describe("getScreenSourceIdForDisplay", () => {
 	});
 });
 
-describe("shouldUseSyntheticLinuxPortalSource", () => {
-	it("keeps Wayland portal capture on the synthetic source path", () => {
+describe("display media source resolution", () => {
+	for (const selectedSourceId of [null, "window:101:0", LINUX_PORTAL_SCREEN_SOURCE_ID]) {
+		it(`opens Wayland through Chromium without pre-enumeration (${selectedSourceId})`, async () => {
+			const getSources = vi.fn();
+			expect(
+				await resolveDisplayMediaSource({
+					platform: "linux",
+					env: { XDG_SESSION_TYPE: "wayland" },
+					selectedSourceId,
+					getSources,
+				}),
+			).toEqual({ id: "screen:0:0", name: "Entire screen" });
+			expect(getSources).not.toHaveBeenCalled();
+		});
+	}
+	it("returns only the requested X11 source and excludes preview pixels", async () => {
+		const getSources = vi.fn().mockResolvedValue([
+			{ id: "screen:1:0", name: "Screen" },
+			{ id: "window:101:0", name: "Document", thumbnail: "pixels" },
+		]);
 		expect(
-			shouldUseSyntheticLinuxPortalSource({
-				env: { XDG_SESSION_TYPE: "wayland", WAYLAND_DISPLAY: "wayland-0" },
+			await resolveDisplayMediaSource({
 				platform: "linux",
-				sourceId: LINUX_PORTAL_SCREEN_SOURCE_ID,
+				env: { XDG_SESSION_TYPE: "x11" },
+				selectedSourceId: "window:101:0",
+				getSources,
 			}),
-		).toBe(true);
+		).toEqual({ id: "window:101:0", name: "Document" });
 	});
-
-	it("lets X11 use Electron desktopCapturer sources instead of a synthetic id", () => {
+	it("does not record a different source if the selected window closes", async () => {
+		const getSources = vi.fn().mockResolvedValue([{ id: "screen:1:0", name: "Screen" }]);
 		expect(
-			shouldUseSyntheticLinuxPortalSource({
-				env: { XDG_SESSION_TYPE: "x11", DISPLAY: ":0" },
+			await resolveDisplayMediaSource({
 				platform: "linux",
-				sourceId: LINUX_PORTAL_SCREEN_SOURCE_ID,
+				env: { XDG_SESSION_TYPE: "x11" },
+				selectedSourceId: "window:101:0",
+				getSources,
 			}),
-		).toBe(false);
+		).toBeNull();
 	});
-
-	it("recovers stale fallback ids through the synthetic path on Wayland", () => {
-		expect(
-			shouldUseSyntheticLinuxPortalSource({
-				env: { WAYLAND_DISPLAY: "wayland-0" },
-				platform: "linux",
-				sourceId: "screen:fallback:0",
-			}),
-		).toBe(true);
-	});
-
-	it("defaults unknown Linux sessions with WAYLAND_DISPLAY to the synthetic path", () => {
-		expect(
-			shouldUseSyntheticLinuxPortalSource({
-				env: { WAYLAND_DISPLAY: "wayland-0" },
-				platform: "linux",
-				sourceId: null,
-			}),
-		).toBe(true);
-	});
-
-	it("does not synthesize for concrete source ids", () => {
-		expect(
-			shouldUseSyntheticLinuxPortalSource({
-				env: { XDG_SESSION_TYPE: "wayland", WAYLAND_DISPLAY: "wayland-0" },
-				platform: "linux",
-				sourceId: "screen:42:0",
-			}),
-		).toBe(false);
-	});
-
-	it("does not synthesize outside Linux", () => {
-		expect(
-			shouldUseSyntheticLinuxPortalSource({
-				env: { XDG_SESSION_TYPE: "wayland", WAYLAND_DISPLAY: "wayland-0" },
-				platform: "win32",
-				sourceId: LINUX_PORTAL_SCREEN_SOURCE_ID,
-			}),
-		).toBe(false);
-	});
+	for (const selectedSourceId of [null, LINUX_PORTAL_SCREEN_SOURCE_ID]) {
+		it(`does not open a portal or pick a default on X11 (${selectedSourceId})`, async () => {
+			const getSources = vi.fn();
+			expect(
+				await resolveDisplayMediaSource({
+					platform: "linux",
+					env: { XDG_SESSION_TYPE: "x11", WAYLAND_DISPLAY: "wayland-0" },
+					selectedSourceId,
+					getSources,
+				}),
+			).toBeNull();
+			expect(getSources).not.toHaveBeenCalled();
+		});
+	}
 });

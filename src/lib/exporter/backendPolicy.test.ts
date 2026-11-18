@@ -53,7 +53,7 @@ describe("backendPolicy", () => {
 				backendPreference: "auto",
 				platform: "win32",
 				nativeStaticLayoutAvailable: true,
-				nativeStaticLayoutSkipReasons: ["unsupported-frame-overlay"],
+				nativeStaticLayoutSkipReasons: ["unsupported-caption-overlay"],
 			}),
 		).toEqual({
 			selectedRoute: "breeze-stream",
@@ -102,6 +102,23 @@ describe("backendPolicy", () => {
 					status: "fallback",
 					reasons: ["breeze-unavailable-fallback"],
 				},
+			],
+		});
+	});
+
+	it("routes explicit Mac Breeze exports directly to streaming", () => {
+		expect(
+			planLightningExportRoutes({
+				backendPreference: "breeze",
+				platform: "darwin",
+				nativeStaticLayoutAvailable: true,
+			}),
+		).toMatchObject({
+			selectedRoute: "breeze-stream",
+			decisions: [
+				{ route: "native-static-layout", status: "rejected" },
+				{ route: "breeze-stream", status: "selected" },
+				{ route: "webcodecs", status: "fallback" },
 			],
 		});
 	});

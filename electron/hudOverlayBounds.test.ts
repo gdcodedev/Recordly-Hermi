@@ -4,7 +4,6 @@ import {
 	getHudOverlayWindowBounds,
 	resizeHudOverlayFallbackBounds,
 	shouldExpandHudOverlayFallback,
-	shouldResizeHudOverlayFallback,
 } from "./hudOverlayBounds";
 
 describe("getHudOverlayWindowBounds", () => {
@@ -146,24 +145,6 @@ describe("resizeHudOverlayFallbackBounds", () => {
 	});
 });
 
-describe("shouldResizeHudOverlayFallback", () => {
-	it("allows non-passthrough HUD windows to expand for menus when idle", () => {
-		expect(shouldResizeHudOverlayFallback(false, false)).toBe(true);
-	});
-
-	it("does not resize full passthrough HUD windows", () => {
-		expect(shouldResizeHudOverlayFallback(true, false)).toBe(false);
-	});
-
-	it("keeps the recording HUD compact in non-passthrough mode", () => {
-		expect(shouldResizeHudOverlayFallback(false, true)).toBe(false);
-	});
-
-	it("keeps the fallback stable while source selection is active", () => {
-		expect(shouldResizeHudOverlayFallback(false, false, true)).toBe(false);
-	});
-});
-
 describe("shouldExpandHudOverlayFallback", () => {
 	it("expands while recording only when the floating webcam preview is visible", () => {
 		expect(
@@ -193,5 +174,15 @@ describe("shouldExpandHudOverlayFallback", () => {
 				webcamPreviewVisible: false,
 			}),
 		).toBe(true);
+	});
+
+	it("does not expand for webcam visibility outside recording", () => {
+		expect(
+			shouldExpandHudOverlayFallback({
+				fallbackExpanded: false,
+				recordingActive: false,
+				webcamPreviewVisible: true,
+			}),
+		).toBe(false);
 	});
 });

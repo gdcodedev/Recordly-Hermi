@@ -13,6 +13,8 @@ export interface ZoomRegion {
 	endMs: number;
 	depth: ZoomDepth;
 	focus: ZoomFocus;
+	/** Telemetry targets use source coordinates; editor-picked targets use the cropped viewport. */
+	focusSpace?: "source" | "viewport";
 	mode?: ZoomMode;
 }
 
@@ -28,6 +30,8 @@ export interface CursorTelemetryPoint {
 		| "right-click"
 		| "middle-click"
 		| "mouseup";
+	/** Button whose down/up transition this sample records. */
+	mouseButton?: 1 | 2 | 3;
 	cursorType?:
 		| "arrow"
 		| "text"
@@ -55,12 +59,26 @@ export interface CursorVisualSettings {
 	style: CursorStyle;
 }
 
-export type CursorStyle = "macos" | "tahoe" | "tahoe-inverted" | "dot" | "figma" | (string & {}); // extension-contributed cursor styles
+export type CursorStyle =
+	| "macos"
+	| "tahoe"
+	| "tahoe-inverted"
+	| "windows11"
+	| "dot"
+	| "figma"
+	| "bold-outline"
+	| "pixel-hand"
+	| "bee"
+	| "catppuccin-pink"
+	| "breezex"
+	| (string & {});
 export const DEFAULT_CURSOR_STYLE: CursorStyle = "tahoe";
 
-export type CursorClickEffectStyle = "none" | "spotlight" | "ripple" | "echo";
+export type CursorClickEffectStyle = "none" | "spotlight" | "ripple" | "echo" | "burst";
 export const DEFAULT_CURSOR_CLICK_EFFECT: CursorClickEffectStyle = "none";
-export const DEFAULT_CURSOR_CLICK_EFFECT_COLOR = "#2563EB";
+export const DEFAULT_CURSOR_CLICK_EFFECT_COLOR = "#9CA3AF";
+export const DEFAULT_CURSOR_RIPPLE_COLOR = DEFAULT_CURSOR_CLICK_EFFECT_COLOR;
+export const DEFAULT_CURSOR_BURST_COLOR = DEFAULT_CURSOR_CLICK_EFFECT_COLOR;
 export const DEFAULT_CURSOR_CLICK_EFFECT_SCALE = 1;
 export const DEFAULT_CURSOR_CLICK_EFFECT_OPACITY = 1;
 export const DEFAULT_CURSOR_CLICK_EFFECT_DURATION_MS = 600;
@@ -69,11 +87,11 @@ export function normalizeCursorClickEffectStyle(
 	value: unknown,
 	fallback: CursorClickEffectStyle = DEFAULT_CURSOR_CLICK_EFFECT,
 ): CursorClickEffectStyle {
-	if (value === "burst") {
-		return "echo";
-	}
-
-	return value === "none" || value === "spotlight" || value === "ripple" || value === "echo"
+	return value === "none" ||
+		value === "spotlight" ||
+		value === "ripple" ||
+		value === "echo" ||
+		value === "burst"
 		? value
 		: fallback;
 }
@@ -103,6 +121,7 @@ export type EditorEffectSection =
 	| "scene"
 	| "cursor"
 	| "captions"
+	| "caption"
 	| "webcam"
 	| "settings"
 	| "zoom"
@@ -115,6 +134,8 @@ export type EditorEffectSection =
 
 export type ZoomTransitionEasing = "recordly" | "glide" | "smooth" | "snappy" | "linear";
 
+export type WebcamShape = "circle" | "squircle" | "rectangle";
+
 export type WebcamCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 export type WebcamPositionPreset =
 	| WebcamCorner
@@ -126,6 +147,14 @@ export type WebcamPositionPreset =
 	| "custom";
 
 export interface WebcamOverlaySettings {
+	/** Missing in legacy projects, which retain the squircle mask. */
+	shape?: WebcamShape;
+	/** Shared edge appearance in the editor and exported video. */
+	previewFrame?: "standard" | "soft-blur";
+	/** Source-time intervals containing webcam footage in an imported sequence. */
+	visibleRanges?: { startMs: number; endMs: number }[];
+	/** Repeat independently uploaded webcam footage. */
+	loop?: boolean;
 	enabled: boolean;
 	sourcePath: string | null;
 	timeOffsetMs: number;
@@ -136,17 +165,21 @@ export interface WebcamOverlaySettings {
 	positionX: number;
 	positionY: number;
 	size: number;
+	width: number;
+	height: number;
 	reactToZoom: boolean;
-	cornerRadius: number;
+	roundness: number;
+	/** Older saves use the shape preset's roundness on load. */
+	roundnessVersion?: typeof WEBCAM_ROUNDNESS_VERSION;
 	shadow: number;
 	margin: number;
 }
 
 export const DEFAULT_CURSOR_SIZE = 3.0;
 export const DEFAULT_CURSOR_SMOOTHING = 0.67;
-export const DEFAULT_CURSOR_MOTION_BLUR = 0.4;
+export const DEFAULT_CURSOR_MOTION_BLUR = 0.6;
 export const DEFAULT_CURSOR_CLICK_BOUNCE = 2.5;
-export const DEFAULT_CURSOR_CLICK_BOUNCE_DURATION = 350;
+export const DEFAULT_CURSOR_CLICK_BOUNCE_DURATION = 230;
 export const DEFAULT_CURSOR_SWAY = 0.4;
 export const DEFAULT_ZOOM_SMOOTHNESS = 0.5;
 export const DEFAULT_ZOOM_MOTION_BLUR = 0.35;
@@ -177,10 +210,12 @@ export const DEFAULT_CONNECTED_ZOOM_DURATION_MS = 1000;
 export const DEFAULT_ZOOM_IN_EASING: ZoomTransitionEasing = "recordly";
 export const DEFAULT_ZOOM_OUT_EASING: ZoomTransitionEasing = "recordly";
 export const DEFAULT_CONNECTED_ZOOM_EASING: ZoomTransitionEasing = "glide";
-export const DEFAULT_WEBCAM_SIZE = 40;
+export const DEFAULT_WEBCAM_SIZE = 50;
 export const DEFAULT_WEBCAM_REACT_TO_ZOOM = true;
-export const DEFAULT_WEBCAM_CORNER_RADIUS = 90;
-export const DEFAULT_WEBCAM_SHADOW = 0.67;
+export const DEFAULT_WEBCAM_ROUNDNESS = 20;
+export const WEBCAM_ROUNDNESS_VERSION = 1;
+export const DEFAULT_SHADOW_INTENSITY = 0.5;
+export const DEFAULT_WEBCAM_SHADOW = 0.2;
 export const DEFAULT_WEBCAM_MARGIN = 24;
 export const DEFAULT_WEBCAM_POSITION_PRESET: WebcamPositionPreset = "bottom-right";
 export const DEFAULT_WEBCAM_POSITION_X = 1;
@@ -188,6 +223,8 @@ export const DEFAULT_WEBCAM_POSITION_Y = 1;
 export const DEFAULT_WEBCAM_TIME_OFFSET_MS = 0;
 
 export const DEFAULT_WEBCAM_OVERLAY: WebcamOverlaySettings = {
+	previewFrame: "soft-blur",
+	shape: "circle",
 	enabled: false,
 	sourcePath: null,
 	timeOffsetMs: DEFAULT_WEBCAM_TIME_OFFSET_MS,
@@ -198,8 +235,11 @@ export const DEFAULT_WEBCAM_OVERLAY: WebcamOverlaySettings = {
 	positionX: DEFAULT_WEBCAM_POSITION_X,
 	positionY: DEFAULT_WEBCAM_POSITION_Y,
 	size: DEFAULT_WEBCAM_SIZE,
+	width: DEFAULT_WEBCAM_SIZE,
+	height: DEFAULT_WEBCAM_SIZE,
 	reactToZoom: DEFAULT_WEBCAM_REACT_TO_ZOOM,
-	cornerRadius: DEFAULT_WEBCAM_CORNER_RADIUS,
+	roundness: DEFAULT_WEBCAM_ROUNDNESS,
+	roundnessVersion: WEBCAM_ROUNDNESS_VERSION,
 	shadow: DEFAULT_WEBCAM_SHADOW,
 	margin: DEFAULT_WEBCAM_MARGIN,
 };
@@ -212,17 +252,32 @@ export interface TrimRegion {
 
 export interface ClipRegion {
 	id: string;
+	/** Where the clip sits on the timeline. */
 	startMs: number;
+	/** Where the clip ends on the timeline (`startMs` + source duration / speed). */
 	endMs: number;
+	/**
+	 * Where the clip reads from in the recording. Defaults to `startMs`, which is
+	 * only the same thing while everything before it plays at 1x — splitting or
+	 * left-trimming a sped-up clip moves the source in without moving the clip.
+	 */
+	sourceStartMs?: number;
+	/** Bounds of this recording within the shared media source. */
+	sourceMinMs?: number;
+	sourceMaxMs?: number;
 	speed: number;
 	muted?: boolean;
 	showSourceAudio?: boolean;
 }
 
+export function getClipSourceStartMs(clip: ClipRegion): number {
+	return Number.isFinite(clip.sourceStartMs) ? (clip.sourceStartMs as number) : clip.startMs;
+}
+
 export function getClipSourceEndMs(clip: ClipRegion): number {
 	const displayDurationMs = Math.max(0, clip.endMs - clip.startMs);
 	const speed = Number.isFinite(clip.speed) && clip.speed > 0 ? clip.speed : 1;
-	return Math.round(clip.startMs + displayDurationMs * speed);
+	return Math.round(getClipSourceStartMs(clip) + displayDurationMs * speed);
 }
 
 export function getTimelineDurationMs(clips: ClipRegion[], sourceDurationMs: number): number {
@@ -233,7 +288,7 @@ export function getTimelineDurationMs(clips: ClipRegion[], sourceDurationMs: num
 
 	return clips.reduce(
 		(durationMs, clip) => Math.max(durationMs, Math.max(0, Math.round(clip.endMs))),
-		baseDurationMs,
+		0,
 	);
 }
 
@@ -245,25 +300,22 @@ function getSafeClipSpeed(clip: ClipRegion) {
 	return Number.isFinite(clip.speed) && clip.speed > 0 ? clip.speed : 1;
 }
 
-function clampToNearestClipBoundary(
-	timeMs: number,
-	clips: ClipRegion[],
-	kind: "timeline" | "source",
-) {
+function mapNearestClipBoundary(timeMs: number, clips: ClipRegion[], from: "timeline" | "source") {
 	let nearestTimeMs = Math.round(timeMs);
 	let nearestDistance = Number.POSITIVE_INFINITY;
 
 	for (const clip of clips) {
-		const boundaries =
-			kind === "timeline"
-				? [clip.startMs, clip.endMs]
-				: [clip.startMs, getClipSourceEndMs(clip)];
+		const boundaries = [
+			[clip.startMs, getClipSourceStartMs(clip)],
+			[clip.endMs, getClipSourceEndMs(clip)],
+		];
 
-		for (const boundary of boundaries) {
-			const distance = Math.abs(timeMs - boundary);
+		for (const [timelineTimeMs, sourceTimeMs] of boundaries) {
+			const inputTimeMs = from === "timeline" ? timelineTimeMs : sourceTimeMs;
+			const distance = Math.abs(timeMs - inputTimeMs);
 			if (distance < nearestDistance) {
 				nearestDistance = distance;
-				nearestTimeMs = Math.round(boundary);
+				nearestTimeMs = Math.round(from === "timeline" ? sourceTimeMs : timelineTimeMs);
 			}
 		}
 	}
@@ -276,18 +328,20 @@ export function mapTimelineTimeToSourceTime(timeMs: number, clips: ClipRegion[])
 	const sortedClips = sortClipRegions(clips);
 
 	for (const clip of sortedClips) {
-		if (roundedTimeMs < clip.startMs || roundedTimeMs > clip.endMs) {
+		if (timeMs < clip.startMs || timeMs >= clip.endMs) {
 			continue;
 		}
 
-		return Math.round(clip.startMs + (roundedTimeMs - clip.startMs) * getSafeClipSpeed(clip));
+		return Math.round(
+			getClipSourceStartMs(clip) + (roundedTimeMs - clip.startMs) * getSafeClipSpeed(clip),
+		);
 	}
 
 	if (sortedClips.length === 0) {
 		return roundedTimeMs;
 	}
 
-	return clampToNearestClipBoundary(roundedTimeMs, sortedClips, "timeline");
+	return mapNearestClipBoundary(roundedTimeMs, sortedClips, "timeline");
 }
 
 export function mapSourceTimeToTimelineTime(timeMs: number, clips: ClipRegion[]): number {
@@ -295,27 +349,25 @@ export function mapSourceTimeToTimelineTime(timeMs: number, clips: ClipRegion[])
 	const sortedClips = sortClipRegions(clips);
 
 	for (const clip of sortedClips) {
+		const sourceStartMs = getClipSourceStartMs(clip);
 		const sourceEndMs = getClipSourceEndMs(clip);
-		if (roundedTimeMs < clip.startMs || roundedTimeMs > sourceEndMs) {
+		if (timeMs < sourceStartMs || timeMs >= sourceEndMs) {
 			continue;
 		}
 
-		return Math.round(clip.startMs + (roundedTimeMs - clip.startMs) / getSafeClipSpeed(clip));
+		return Math.round(clip.startMs + (roundedTimeMs - sourceStartMs) / getSafeClipSpeed(clip));
 	}
 
 	if (sortedClips.length === 0) {
 		return roundedTimeMs;
 	}
 
-	return clampToNearestClipBoundary(roundedTimeMs, sortedClips, "source");
+	return mapNearestClipBoundary(roundedTimeMs, sortedClips, "source");
 }
 
 export function findClipAtTimelineTime(timeMs: number, clips: ClipRegion[]): ClipRegion | null {
-	const roundedTimeMs = Math.round(timeMs);
 	return (
-		sortClipRegions(clips).find(
-			(clip) => roundedTimeMs >= clip.startMs && roundedTimeMs < clip.endMs,
-		) ?? null
+		sortClipRegions(clips).find((clip) => timeMs >= clip.startMs && timeMs < clip.endMs) ?? null
 	);
 }
 
@@ -351,15 +403,24 @@ export function extendAutoFullTrackClip(
 /** Convert clip regions (kept segments) to trim regions (gaps to remove). */
 export function clipsToTrims(clips: ClipRegion[], totalDurationMs: number): TrimRegion[] {
 	if (clips.length === 0) return [];
-	const sorted = [...clips].sort((a, b) => a.startMs - b.startMs);
+	// Clips are ordered on the timeline, but a moved clip keeps its source
+	// in-point, so timeline order says nothing about source order. Walk the
+	// source ranges the clips claim and trim whatever is left uncovered.
+	const coveredSpans = clips
+		.map((clip) => ({
+			startMs: getClipSourceStartMs(clip),
+			endMs: getClipSourceEndMs(clip),
+		}))
+		.filter((span) => span.endMs > span.startMs)
+		.sort((left, right) => left.startMs - right.startMs);
 	const trims: TrimRegion[] = [];
 	let cursor = 0;
 	let trimId = 1;
-	for (const clip of sorted) {
-		if (clip.startMs > cursor) {
-			trims.push({ id: `trim-gap-${trimId++}`, startMs: cursor, endMs: clip.startMs });
+	for (const span of coveredSpans) {
+		if (span.startMs > cursor) {
+			trims.push({ id: `trim-gap-${trimId++}`, startMs: cursor, endMs: span.startMs });
 		}
-		cursor = getClipSourceEndMs(clip);
+		cursor = Math.max(cursor, span.endMs);
 	}
 	if (cursor < totalDurationMs) {
 		trims.push({ id: `trim-gap-${trimId++}`, startMs: cursor, endMs: totalDurationMs });
@@ -378,7 +439,7 @@ export function trimsToClips(trims: TrimRegion[], totalDurationMs: number): Clip
 		if (trim.startMs > cursor) {
 			clips.push({ id: `clip-${clipId++}`, startMs: cursor, endMs: trim.startMs, speed: 1 });
 		}
-		cursor = trim.endMs;
+		cursor = Math.max(cursor, trim.endMs);
 	}
 	if (cursor < totalDurationMs) {
 		clips.push({ id: `clip-${clipId++}`, startMs: cursor, endMs: totalDurationMs, speed: 1 });
@@ -430,11 +491,11 @@ export interface AnnotationTextStyle {
 }
 
 function getDefaultAnnotationFontFamily() {
-	return '"SF Pro Display", "SF Pro Text", Helvetica, sans-serif';
+	return '"SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif';
 }
 
 export function getDefaultCaptionFontFamily() {
-	return '"SF Pro Text", "SF Pro Display", Helvetica, sans-serif';
+	return '"SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif';
 }
 
 export interface AnnotationRegion {
@@ -466,7 +527,7 @@ export const DEFAULT_ANNOTATION_SIZE: AnnotationSize = {
 };
 
 export const DEFAULT_ANNOTATION_STYLE: AnnotationTextStyle = {
-	color: "#ffffff",
+	color: "#000000",
 	backgroundColor: "transparent",
 	fontSize: 32,
 	fontFamily: getDefaultAnnotationFontFamily(),
@@ -497,6 +558,8 @@ export const DEFAULT_CROP_REGION: CropRegion = {
 	height: 1,
 };
 
+export const ADVANCED_VERTICAL_PADDING_MAX = 250;
+
 export interface Padding {
 	top: number;
 	bottom: number;
@@ -506,10 +569,10 @@ export interface Padding {
 }
 
 export const DEFAULT_PADDING: Padding = {
-	top: 20,
-	bottom: 20,
-	left: 20,
-	right: 20,
+	top: 0,
+	bottom: 0,
+	left: 0,
+	right: 0,
 	linked: true,
 };
 export type {
@@ -543,9 +606,22 @@ export interface CaptionCueWord {
 }
 
 export type AutoCaptionAnimation = "none" | "fade" | "rise" | "pop";
+export type AutoCaptionStyle =
+	| "classic"
+	| "tiktok"
+	| "karaoke"
+	| "minimal"
+	| "neon"
+	| "paper"
+	| "reveal"
+	| "serif";
 
 export interface AutoCaptionSettings {
+	/** Legacy style IDs remain supported when reopening older projects. */
+	style?: AutoCaptionStyle;
 	enabled: boolean;
+	/** Show the hover ghost on the timeline caption track for click-to-add. */
+	timelineQuickAdd: boolean;
 	language: string;
 	fontFamily: string;
 	fontSize: number;
@@ -560,18 +636,20 @@ export interface AutoCaptionSettings {
 }
 
 export const DEFAULT_AUTO_CAPTION_SETTINGS: AutoCaptionSettings = {
+	style: "reveal",
 	enabled: false,
+	timelineQuickAdd: true,
 	language: "auto",
 	fontFamily: getDefaultCaptionFontFamily(),
 	fontSize: 30,
 	bottomOffset: 3,
 	maxWidth: 62,
 	maxRows: 1,
-	animationStyle: "fade",
-	boxRadius: 17.5,
+	animationStyle: "none",
+	boxRadius: 8,
 	textColor: "#FFFFFF",
-	inactiveTextColor: "#A3A3A3",
-	backgroundOpacity: 0.9,
+	inactiveTextColor: "#FFFFFF",
+	backgroundOpacity: 1,
 };
 
 export type PlaybackSpeed = 0.25 | 0.5 | 0.75 | 1.25 | 1.5 | 1.75 | 2;
@@ -605,7 +683,7 @@ export const ZOOM_DEPTH_SCALES: Record<ZoomDepth, number> = {
 };
 
 export const DEFAULT_ZOOM_DEPTH: ZoomDepth = 3;
-export const DEFAULT_AUTO_ZOOM_DEPTH: ZoomDepth = 2;
+export const DEFAULT_AUTO_ZOOM_DEPTH: ZoomDepth = DEFAULT_ZOOM_DEPTH;
 
 export function clampFocusToDepth(focus: ZoomFocus, _depth: ZoomDepth): ZoomFocus {
 	return {

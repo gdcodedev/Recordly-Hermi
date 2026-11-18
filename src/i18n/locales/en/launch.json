@@ -1,5 +1,15 @@
 {
 	"recording": {
+		"audio": "Audio",
+		"audioSettings": "Audio settings",
+		"camera": "Camera",
+		"cameraSettings": "Camera settings",
+		"systemAudio": "Computer audio",
+		"systemAudioDescription": "Apps, videos and system sounds",
+		"off": "Off",
+		"cameraPreview": "Preview",
+		"cancelCountdown": "Cancel countdown",
+		"home": "Home",
 		"disableSystemAudio": "Disable system audio",
 		"enableSystemAudio": "Enable system audio",
 		"disableMicrophone": "Disable microphone",
@@ -76,5 +86,21 @@
 		"microphoneDenied": "Microphone access was denied. Recording will continue without microphone audio.",
 		"failedToStart": "Failed to start recording: {{error}}",
 		"failedToStartGeneric": "Failed to start recording"
+	},
+	"updateToast": {
+		"availableTitle": "Update available",
+		"experimentalAvailableTitle": "Experimental update available",
+		"experimentalDescription": "You've opted into experimental updates so you have the choice to test the latest update of Recordly before it's widely available.",
+		"downloadingTitle": "Downloading your update",
+		"readyTitle": "Ready to restart",
+		"checkErrorTitle": "Couldn't check for updates",
+		"downloadErrorTitle": "Couldn't download the update",
+		"experimentalBadge": "Experimental",
+		"previewBadge": "Preview",
+		"notNow": "Not now",
+		"updateNow": "Update now",
+		"updateAndRestart": "Update & restart",
+		"restartToUpdate": "Restart to update",
+		"tryAgain": "Try again"
 	}
 }

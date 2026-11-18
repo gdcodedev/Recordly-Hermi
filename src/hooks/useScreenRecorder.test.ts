@@ -3,13 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	createBrowserRecordingOptions,
 	createProcessedMicrophoneConstraints,
-	getScreenCaptureCursorSetting,
 	normalizeBrowserMicrophoneProfile,
 	resolveBrowserCaptureCursorPolicy,
-	resolveLinuxPortalCursorPresentation,
-	shouldLockHudDuringDisplaySelection,
-	shouldUseLinuxPortalCapture,
 	shouldUseNativeWindowsCaptureForSource,
+	stopAndDiscardNativeCapture,
 } from "./useScreenRecorder";
 
 type RecordingState = "inactive" | "recording" | "paused";
@@ -37,12 +34,12 @@ function createMockMediaRecorder(initialState: RecordingState = "inactive") {
 }
 
 describe("createProcessedMicrophoneConstraints", () => {
-	it("requests browser voice processing with AGC for the default microphone", () => {
+	it("disables AGC to avoid microphone crackle while keeping default echo and noise processing", () => {
 		expect(createProcessedMicrophoneConstraints()).toEqual({
 			audio: {
 				echoCancellation: true,
 				noiseSuppression: true,
-				autoGainControl: true,
+				autoGainControl: false,
 				channelCount: { ideal: 1 },
 				sampleRate: { ideal: 48000 },
 			},
@@ -56,7 +53,7 @@ describe("createProcessedMicrophoneConstraints", () => {
 				deviceId: { exact: "device-123" },
 				echoCancellation: true,
 				noiseSuppression: true,
-				autoGainControl: true,
+				autoGainControl: false,
 				channelCount: { ideal: 1 },
 				sampleRate: { ideal: 48000 },
 			},
@@ -110,8 +107,8 @@ describe("createProcessedMicrophoneConstraints", () => {
 
 	it("normalizes invalid lab microphone profiles to production voice processing", () => {
 		expect(normalizeBrowserMicrophoneProfile("RAW")).toBe("raw");
-		expect(normalizeBrowserMicrophoneProfile("unknown")).toBe("processed");
-		expect(normalizeBrowserMicrophoneProfile(null)).toBe("processed");
+		expect(normalizeBrowserMicrophoneProfile("unknown")).toBe("no-agc");
+		expect(normalizeBrowserMicrophoneProfile(null)).toBe("no-agc");
 	});
 });
 
@@ -149,7 +146,6 @@ describe("resolveBrowserCaptureCursorPolicy", () => {
 			streamCursor: "never",
 			hideOsCursorBeforeRecording: true,
 			hideEditorOverlayCursorByDefault: true,
-			nativeCaptureUnavailable: false,
 		});
 	});
 
@@ -160,127 +156,7 @@ describe("resolveBrowserCaptureCursorPolicy", () => {
 			streamCursor: "always",
 			hideOsCursorBeforeRecording: false,
 			hideEditorOverlayCursorByDefault: true,
-			nativeCaptureUnavailable: true,
 		});
-	});
-
-	it("does not fake OS cursor hiding on Linux portal capture", () => {
-		expect(resolveBrowserCaptureCursorPolicy({ platform: "linux" })).toEqual({
-			streamCursor: "never",
-			hideOsCursorBeforeRecording: false,
-			hideEditorOverlayCursorByDefault: true,
-			nativeCaptureUnavailable: true,
-		});
-	});
-});
-
-describe("resolveLinuxPortalCursorPresentation", () => {
-	it("enables the Recordly overlay only when the portal confirms cursor-hidden capture", () => {
-		expect(
-			resolveLinuxPortalCursorPresentation({
-				requestedCursor: "never",
-				actualCursor: "never",
-			}),
-		).toEqual({
-			hideEditorOverlayCursorByDefault: false,
-			nativeCaptureUnavailable: false,
-		});
-	});
-
-	it("keeps the overlay disabled when the portal embeds or omits cursor settings", () => {
-		expect(
-			resolveLinuxPortalCursorPresentation({
-				requestedCursor: "never",
-				actualCursor: "always",
-			}),
-		).toEqual({
-			hideEditorOverlayCursorByDefault: true,
-			nativeCaptureUnavailable: true,
-		});
-		expect(
-			resolveLinuxPortalCursorPresentation({
-				requestedCursor: "never",
-				actualCursor: null,
-			}),
-		).toEqual({
-			hideEditorOverlayCursorByDefault: true,
-			nativeCaptureUnavailable: true,
-		});
-	});
-});
-
-describe("shouldUseLinuxPortalCapture", () => {
-	it("uses the portal when the selected source is the Linux sentinel", () => {
-		expect(
-			shouldUseLinuxPortalCapture({
-				browserCaptureSourceId: "screen:linux-portal",
-				selectedSourceId: "screen:linux-portal",
-			}),
-		).toBe(true);
-	});
-
-	it("uses the portal when a stale screen fallback resolves to the Linux sentinel", () => {
-		expect(
-			shouldUseLinuxPortalCapture({
-				browserCaptureSourceId: "screen:linux-portal",
-				selectedSourceId: "screen:fallback:42",
-			}),
-		).toBe(true);
-	});
-
-	it("keeps live Electron screen sources on browser getUserMedia", () => {
-		expect(
-			shouldUseLinuxPortalCapture({
-				browserCaptureSourceId: "screen:42:0",
-				selectedSourceId: "screen:42:0",
-			}),
-		).toBe(false);
-	});
-
-	it("prefers a live Electron source over stale portal selection state", () => {
-		expect(
-			shouldUseLinuxPortalCapture({
-				browserCaptureSourceId: "screen:42:0",
-				selectedSourceId: "screen:linux-portal",
-			}),
-		).toBe(false);
-	});
-});
-
-describe("shouldLockHudDuringDisplaySelection", () => {
-	it("locks HUD fallback resizing while Linux portal selection is active", () => {
-		expect(
-			shouldLockHudDuringDisplaySelection({
-				platform: "linux",
-				useLinuxPortal: true,
-			}),
-		).toBe(true);
-	});
-
-	it("keeps non-portal capture flows interactive", () => {
-		expect(
-			shouldLockHudDuringDisplaySelection({
-				platform: "linux",
-				useLinuxPortal: false,
-			}),
-		).toBe(false);
-		expect(
-			shouldLockHudDuringDisplaySelection({
-				platform: "win32",
-				useLinuxPortal: true,
-			}),
-		).toBe(false);
-	});
-});
-
-describe("getScreenCaptureCursorSetting", () => {
-	it("normalizes only supported screen-capture cursor settings", () => {
-		expect(getScreenCaptureCursorSetting({ cursor: "motion" } as MediaTrackSettings)).toBe(
-			"motion",
-		);
-		expect(
-			getScreenCaptureCursorSetting({ cursor: "hidden" } as MediaTrackSettings),
-		).toBeNull();
 	});
 });
 
@@ -289,8 +165,88 @@ describe("shouldUseNativeWindowsCaptureForSource", () => {
 		expect(shouldUseNativeWindowsCaptureForSource({ id: "screen:101:0" })).toBe(true);
 	});
 
-	it("routes window sources through browser capture", () => {
-		expect(shouldUseNativeWindowsCaptureForSource({ id: "window:123456:0" })).toBe(false);
+	it("keeps native Windows capture on window sources", () => {
+		expect(shouldUseNativeWindowsCaptureForSource({ id: "window:123456:0" })).toBe(true);
+	});
+
+	it("keeps browser capture for non-desktop sources", () => {
+		expect(shouldUseNativeWindowsCaptureForSource({ id: "browser-tab:abc" })).toBe(false);
+	});
+});
+
+describe("stopAndDiscardNativeCapture", () => {
+	it("deletes the partial recording after a successful warm-start stop", async () => {
+		const deleteRecordingFile = vi.fn().mockResolvedValue({ success: true });
+
+		await expect(
+			stopAndDiscardNativeCapture({
+				stopNativeScreenRecording: vi.fn().mockResolvedValue({
+					success: true,
+					path: "C:\\Recordly\\warm-start.mp4",
+				}),
+				deleteRecordingFile,
+			}),
+		).resolves.toEqual({
+			stopSucceeded: true,
+			deleteSucceeded: true,
+			path: "C:\\Recordly\\warm-start.mp4",
+		});
+		expect(deleteRecordingFile).toHaveBeenCalledWith("C:\\Recordly\\warm-start.mp4");
+	});
+
+	it("reports an unsuccessful stop without deleting or confirming cleanup", async () => {
+		const deleteRecordingFile = vi.fn();
+
+		await expect(
+			stopAndDiscardNativeCapture({
+				stopNativeScreenRecording: vi.fn().mockResolvedValue({
+					success: false,
+					error: "helper still running",
+				}),
+				deleteRecordingFile,
+			}),
+		).resolves.toEqual({
+			stopSucceeded: false,
+			deleteSucceeded: false,
+			error: "helper still running",
+		});
+		expect(deleteRecordingFile).not.toHaveBeenCalled();
+	});
+
+	it("does not confirm deletion when IPC resolves with a failure result", async () => {
+		const result = await stopAndDiscardNativeCapture({
+			stopNativeScreenRecording: vi
+				.fn()
+				.mockResolvedValue({ success: true, path: "/take.mp4" }),
+			deleteRecordingFile: vi
+				.fn()
+				.mockResolvedValue({ success: false, error: "file locked" }),
+		});
+		expect(result).toMatchObject({
+			stopSucceeded: true,
+			deleteSucceeded: false,
+			path: "/take.mp4",
+		});
+		expect(result.error).toEqual(new Error("file locked"));
+	});
+
+	it("keeps the stopped path available when deletion fails so cleanup can retry", async () => {
+		const deleteError = new Error("file locked");
+
+		await expect(
+			stopAndDiscardNativeCapture({
+				stopNativeScreenRecording: vi.fn().mockResolvedValue({
+					success: true,
+					path: "C:\\Recordly\\warm-start.mp4",
+				}),
+				deleteRecordingFile: vi.fn().mockRejectedValue(deleteError),
+			}),
+		).resolves.toEqual({
+			stopSucceeded: true,
+			deleteSucceeded: false,
+			path: "C:\\Recordly\\warm-start.mp4",
+			error: deleteError,
+		});
 	});
 });
 
@@ -458,6 +414,7 @@ function cancelRecording(
 	chunks: { current: Blob[] },
 	webcamRecorder?: ReturnType<typeof createMockMediaRecorder> | null,
 	webcamChunks?: { current: Blob[] },
+	stopMicFallbackRecorder?: () => Promise<Blob | null>,
 ) {
 	if (webcamChunks) webcamChunks.current = [];
 	if (webcamRecorder && webcamRecorder.state !== "inactive") {
@@ -465,6 +422,7 @@ function cancelRecording(
 	}
 
 	if (isNativeRecording) {
+		void stopMicFallbackRecorder?.();
 		return { cancelled: true, wasNative: true };
 	}
 
@@ -799,6 +757,23 @@ describe("useScreenRecorder state machine", () => {
 			expect(result.wasNative).toBe(true);
 			expect(webcam.stop).toHaveBeenCalled();
 			expect(recorder.stop).not.toHaveBeenCalled();
+		});
+
+		it("stops the mic fallback recorder when cancelling native recording", () => {
+			const chunks = { current: [] as Blob[] };
+			const stopMicFallbackRecorder = vi.fn(() => Promise.resolve(null));
+
+			const result = cancelRecording(
+				recorder,
+				true,
+				chunks,
+				null,
+				undefined,
+				stopMicFallbackRecorder,
+			);
+
+			expect(result.wasNative).toBe(true);
+			expect(stopMicFallbackRecorder).toHaveBeenCalled();
 		});
 
 		it("handles cancel when recorder is already inactive", () => {
